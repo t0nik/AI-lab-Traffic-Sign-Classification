@@ -1,4 +1,4 @@
-## AI-lab-Traffic-Sign-Detection
+## AI lab project: Traffic sign detection
 A python implementation of detection of traffic signs using machine learning.
 
 ### Algorithms:
