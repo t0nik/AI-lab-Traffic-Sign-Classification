@@ -74,15 +74,16 @@ def parse_data(path):
 
 def main():
 
-    print('Parsing data...')
+    print('Parsing training data...')
     train_data = parse_data('train\\annotations\\')
 
 
 
 
 
-    # debug
+    # debug - training data
     for properties in train_data:
+        # print(properties)
         print(properties['name'])
         print(properties['count'])
         # print(properties['object'])
