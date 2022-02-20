@@ -187,8 +187,8 @@ def print_predicted(data):
             for objects in sample['object']:
                 if objects['type_pred'] == 4 and check_size(sample, objects):
                     print(objects['bounds']['xmin'],
-                          objects['bounds']['ymin'],
                           objects['bounds']['xmax'],
+                          objects['bounds']['ymin'],
                           objects['bounds']['ymax'])
     return
 
@@ -202,8 +202,8 @@ def test_print(data):
         for objects in properties['object']:
             print('predicted:', objects['type_pred'], 'real_type:', objects['type'])
             print(objects['bounds']['xmin'],
-                  objects['bounds']['ymin'],
                   objects['bounds']['xmax'],
+                  objects['bounds']['ymin'],
                   objects['bounds']['ymax'])
 
 
