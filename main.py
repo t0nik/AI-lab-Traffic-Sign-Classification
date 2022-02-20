@@ -7,6 +7,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 
 def parse_data(path):
+    # Parse data, put it into a custom structure
+
     data = []
     # Loop through all .xml files in path
     for filename in glob.glob(path + '*.xml'):
@@ -16,11 +18,13 @@ def parse_data(path):
 
         sample = {}
 
-        # Name, folder, full image
+        # Name, full image, image size
 
+        # Find tag 'filename' and iterate through all occurrences
         for name in root.iter('filename'):
             sample['name'] = name.text
 
+        # Etc.
         for folder in root.iter('folder'):
             image_path = filename.replace('annotations', folder.text)
             image_path = image_path.replace('.xml', sample['name'][-4::])  # .png .jpg
@@ -30,11 +34,9 @@ def parse_data(path):
         size_data = {}
         for size in root.iter('size'):
             for width in size.iter('width'):
-                size_data['width'] = width.text
+                size_data['width'] = int(width.text)
             for height in size.iter('height'):
-                size_data['height'] = height.text
-            for depth in size.iter('depth'):
-                size_data['depth'] = depth.text
+                size_data['height'] = int(height.text)
         sample['size'] = size_data
 
         # Traffic signs in the image
@@ -47,9 +49,13 @@ def parse_data(path):
 
             for name_type in obj.iter('name'):
                 if name_type.text == 'crosswalk':
-                    object_data['type'] = 1  # the goal is to detect crosswalks
-                else:
-                    object_data['type'] = 0
+                    object_data['type'] = 4  # the goal is to detect crosswalks
+                elif name_type.text == 'stop':
+                    object_data['type'] = 3
+                elif name_type.text == 'trafficlight':
+                    object_data['type'] = 2
+                elif name_type.text == 'speedlimit':
+                    object_data['type'] = 1
 
             bounds_data = {}
             for bounds in obj.iter('bndbox'):
@@ -77,21 +83,27 @@ def parse_data(path):
     return data
 
 def balance_dataset(data, ratio):
+    # Reduce elements of dataset, randomly
+    # Ratio interval: from 0.0 to 1.0
+
     sampled_data = random.sample(data, int(ratio * len(data)))
 
     return sampled_data
 
 def learn_bovw(data):
+    # Create a dictionary of visual words from cropped traffic light images
+
     dict_size = 128
     bow = cv2.BOWKMeansTrainer(dict_size)
 
     sift = cv2.SIFT_create()
     for sample in data:
-        key_points = sift.detect(sample['image'], None)
-        key_points, desc = sift.compute(sample['image'], key_points)
+        for object_data in sample['object']:
+            key_points = sift.detect(object_data['obj_image'], None)
+            key_points, desc = sift.compute(object_data['obj_image'], key_points)
 
-        if desc is not None:
-            bow.add(desc)
+            if desc is not None:
+                bow.add(desc)
 
     vocabulary = bow.cluster()
 
@@ -101,14 +113,16 @@ def learn_bovw(data):
 
 
 def extract_features(data):
+    # Create key points in cropped images and determine if they match the vocabulary in the dictionary
+
     sift = cv2.SIFT_create()
     flann = cv2.FlannBasedMatcher_create()
     bow = cv2.BOWImgDescriptorExtractor(sift, flann)
     vocabulary = np.load('voc.npy')
     bow.setVocabulary(vocabulary)
     for sample in data:
-        # compute descriptor and add it as "desc" entry in object_data
         for object_data in sample['object']:
+            # compute descriptor for each object and add it as "desc" entry in object_data
             key_points = sift.detect(object_data['obj_image'], None)
             desc = bow.compute(object_data['obj_image'], key_points)
             object_data['desc'] = desc
@@ -117,7 +131,8 @@ def extract_features(data):
 
 
 def train(data):
-    # train random forest model and return it from function.
+    # Train random forest model and return it from function.
+
     descs = []
     labels = []
     for sample in data:
@@ -133,10 +148,11 @@ def train(data):
     return rf
 
 def predict(rf, data):
-    # perform prediction using trained model and add results as "type_pred" (int) entry in sample
+    # Perform prediction using trained model and add results as "type_pred" (int) entry in object_data
+
     for sample in data:
         for object_data in sample['object']:
-            object_data['type_pred'] = 0 # default value for type_pred is 0 - crosswalk not detected
+            object_data['type_pred'] = 0  # default value for type_pred is 0 - nothing predicted
             if object_data['desc'] is not None:
                 pred = rf.predict(object_data['desc'])
                 object_data['type_pred'] = int(pred)
@@ -144,13 +160,28 @@ def predict(rf, data):
     return data
 
 
+def check_size(sample, objects):
+    # Returns True if size of object is greater or equal to 10% of the image size
+
+    w = sample['size']['width']
+    h = sample['size']['height']
+    w_ob = objects['bounds']['xmax'] - objects['bounds']['xmin']
+    h_ob = objects['bounds']['ymax'] - objects['bounds']['ymin']
+
+    if w_ob >= 0.1*w and h_ob >= 0.1*h:
+        return True
+
+    return False
+
+
 def print_predicted(data):
     # Print detected crosswalks
+
     for sample in data:
         count = 0
         found = False
         for objects in sample['object']:
-            if objects['type_pred'] == 1:
+            if objects['type_pred'] == 4 and check_size(sample, objects):
                 found = True
                 count += 1
 
@@ -158,7 +189,7 @@ def print_predicted(data):
             print(sample['name'])
             print(count)
             for objects in sample['object']:
-                if objects['type_pred'] == 1:
+                if objects['type_pred'] == 4 and check_size(sample, objects):
                     print(objects['bounds']['xmin'],
                           objects['bounds']['ymin'],
                           objects['bounds']['xmax'],
@@ -167,7 +198,7 @@ def print_predicted(data):
 
 
 def test_print(data):
-    # debug - testing print
+    # Function used for debug, skip
     for properties in data:
         # print(properties)
         print(properties['name'])
@@ -191,7 +222,7 @@ def main():
     # test_data = balance_dataset(test_data, 0.3)
 
     # comment both lines after dictionary (voc.npy) is saved to disk
-    # print('Learning BoVW')
+    # print('Learning BoVW...')
     # learn_bovw(train_data)
 
     print('Extracting training features...')
