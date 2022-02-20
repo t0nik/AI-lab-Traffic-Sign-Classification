@@ -40,8 +40,6 @@ def parse_data(path):
         sample['size'] = size_data
 
         # Traffic signs in the image
-
-        sample['count'] = 0
         object_list = []
 
         for obj in root.iter('object'):
@@ -73,8 +71,6 @@ def parse_data(path):
             object_data['obj_image'] = crop
 
             object_list.append(object_data)
-
-            sample['count'] = sample['count'] + 1
 
         sample['object'] = object_list
 
@@ -202,7 +198,7 @@ def test_print(data):
     for properties in data:
         # print(properties)
         print(properties['name'])
-        print(properties['count'])
+        # print(properties['count'])
         for objects in properties['object']:
             print('predicted:', objects['type_pred'], 'real_type:', objects['type'])
             print(objects['bounds']['xmin'],
