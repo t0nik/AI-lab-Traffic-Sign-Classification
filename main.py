@@ -2,6 +2,7 @@ import xml.etree.ElementTree as ET
 import cv2
 import glob
 import numpy as np
+import random
 from sklearn.ensemble import RandomForestClassifier
 
 
@@ -15,7 +16,7 @@ def parse_data(path):
 
         sample = {}
 
-        # Name, folder, size of image
+        # Name, folder, full image
 
         for name in root.iter('filename'):
             sample['name'] = name.text
@@ -53,14 +54,17 @@ def parse_data(path):
             bounds_data = {}
             for bounds in obj.iter('bndbox'):
                 for xmin in bounds.iter('xmin'):
-                    bounds_data['xmin'] = xmin.text
+                    bounds_data['xmin'] = int(xmin.text)
                 for ymin in bounds.iter('ymin'):
-                    bounds_data['ymin'] = ymin.text
+                    bounds_data['ymin'] = int(ymin.text)
                 for xmax in bounds.iter('xmax'):
-                    bounds_data['xmax'] = xmax.text
+                    bounds_data['xmax'] = int(xmax.text)
                 for ymax in bounds.iter('ymax'):
-                    bounds_data['ymax'] = ymax.text
+                    bounds_data['ymax'] = int(ymax.text)
             object_data['bounds'] = bounds_data
+
+            crop = sample['image'][bounds_data['ymin']:bounds_data['ymax'], bounds_data['xmin']:bounds_data['xmax']]
+            object_data['obj_image'] = crop
 
             object_list.append(object_data)
 
@@ -72,9 +76,13 @@ def parse_data(path):
 
     return data
 
+def balance_dataset(data, ratio):
+    sampled_data = random.sample(data, int(ratio * len(data)))
+
+    return sampled_data
 
 def learn_bovw(data):
-    dict_size = 128  # maybe kp x 128?
+    dict_size = 128
     bow = cv2.BOWKMeansTrainer(dict_size)
 
     sift = cv2.SIFT_create()
@@ -99,10 +107,11 @@ def extract_features(data):
     vocabulary = np.load('voc.npy')
     bow.setVocabulary(vocabulary)
     for sample in data:
-        # compute descriptor and add it as "desc" entry in sample
-        key_points = sift.detect(sample['image'], None)
-        desc = bow.compute(sample['image'], key_points)
-        sample['desc'] = desc
+        # compute descriptor and add it as "desc" entry in object_data
+        for object_data in sample['object']:
+            key_points = sift.detect(object_data['obj_image'], None)
+            desc = bow.compute(object_data['obj_image'], key_points)
+            object_data['desc'] = desc
 
     return data
 
@@ -112,10 +121,10 @@ def train(data):
     descs = []
     labels = []
     for sample in data:
-        if sample['desc'] is not None:
-            for objects in sample['object']:
-                descs.append(sample['desc'].squeeze(0))
-                labels.append(objects['type'])
+        for object_data in sample['object']:
+            if object_data['desc'] is not None:
+                descs.append(object_data['desc'].squeeze(0))
+                labels.append(object_data['type'])
 
     rf = RandomForestClassifier()
 
@@ -125,20 +134,63 @@ def train(data):
 
 def predict(rf, data):
     # perform prediction using trained model and add results as "type_pred" (int) entry in sample
-    for idx, sample in enumerate(data):
-        if sample['desc'] is not None:
-            pred = rf.predict(sample['desc'])  # fix
-            sample['type_pred'] = int(pred)  # fix
+    for sample in data:
+        for object_data in sample['object']:
+            object_data['type_pred'] = 0 # default value for type_pred is 0 - crosswalk not detected
+            if object_data['desc'] is not None:
+                pred = rf.predict(object_data['desc'])
+                object_data['type_pred'] = int(pred)
 
     return data
 
 
+def print_predicted(data):
+    # Print detected crosswalks
+    for sample in data:
+        count = 0
+        found = False
+        for objects in sample['object']:
+            if objects['type_pred'] == 1:
+                found = True
+                count += 1
+
+        if found:
+            print(sample['name'])
+            print(count)
+            for objects in sample['object']:
+                if objects['type_pred'] == 1:
+                    print(objects['bounds']['xmin'],
+                          objects['bounds']['ymin'],
+                          objects['bounds']['xmax'],
+                          objects['bounds']['ymax'])
+    return
+
+
+def test_print(data):
+    # debug - testing print
+    for properties in data:
+        # print(properties)
+        print(properties['name'])
+        print(properties['count'])
+        for objects in properties['object']:
+            print('predicted:', objects['type_pred'], 'real_type:', objects['type'])
+            print(objects['bounds']['xmin'],
+                  objects['bounds']['ymin'],
+                  objects['bounds']['xmax'],
+                  objects['bounds']['ymax'])
+
+
 def main():
 
-    print('Parsing training data...')
+    print('Parsing data...')
     train_data = parse_data('train\\annotations\\')
     test_data = parse_data('test\\annotations\\')
 
+    # print('Balancing datasets...')
+    # train_data = balance_dataset(train_data, 0.3)
+    # test_data = balance_dataset(test_data, 0.3)
+
+    # comment both lines after dictionary (voc.npy) is saved to disk
     # print('Learning BoVW')
     # learn_bovw(train_data)
 
@@ -153,20 +205,11 @@ def main():
 
     print('Predicting...')
     test_data = predict(rf, test_data)
-    # evaluate(test_data)
 
-    # debug - training data
-    for properties in test_data:
-        # print(properties)
-        print(properties['name'])
-        print(properties['count'])
-        print(properties['type_pred'])
-        for objects in properties['object']:
-            print(objects['bounds']['xmin'],
-                  objects['bounds']['ymin'],
-                  objects['bounds']['xmax'],
-                  objects['bounds']['ymax'])
+    print('Printing predicted results...')
+    print_predicted(test_data)
 
+    # test_print(train_data)
 
 if __name__ == '__main__':
     main()
